@@ -9,12 +9,13 @@ import { execSync } from "node:child_process";
 
 // Create a new MCP server instance
 const server = new McpServer({
-  name: "emacs-mcp",
-  version: "0.0.1",
-  capabilities: {
-    tools: {},
-  },
-  instructions: "This server provides access to evaluate Emacs Lisp expressions via emacsclient in the currently visible Emacs buffer. You can evaluate code or capture visible text content from the active Emacs window. Make sure Emacs is running with server mode enabled (M-x server-start).",
+	name: "emacs-mcp",
+	version: "0.0.1",
+	capabilities: {
+		tools: {},
+	},
+	instructions:
+		"This server provides access to evaluate Emacs Lisp expressions via emacsclient in the currently visible Emacs buffer. You can evaluate code or capture visible text content from the active Emacs window. Make sure Emacs is running with server mode enabled (M-x server-start).",
 });
 
 /**
@@ -23,9 +24,9 @@ const server = new McpServer({
  * @returns {string} - The escaped expression
  */
 function escapeEmacsExpression(expression) {
-  // Replace double quotes with escaped double quotes
-  // Replace backslashes with escaped backslashes
-  return expression.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+	// Replace double quotes with escaped double quotes
+	// Replace backslashes with escaped backslashes
+	return expression.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 /**
@@ -33,218 +34,235 @@ function escapeEmacsExpression(expression) {
  * @returns {boolean} - True if Emacs server is running, false otherwise
  */
 function isEmacsServerRunning() {
-  try {
-    execSync('emacsclient --eval "t"', { encoding: 'utf8' });
-    return true;
-  } catch (error) {
-    return false;
-  }
+	try {
+		execSync('emacsclient --eval "t"', { encoding: "utf8" });
+		return true;
+	} catch (error) {
+		return false;
+	}
 }
 
-
+/**
+ * Creates a standard error response for when the Emacs server is not running
+ * @returns {Object} - Error response object conforming to MCP protocol
+ */
+function createServerNotRunningError() {
+	return {
+		content: [
+			{
+				type: "text",
+				text: "Error: Emacs server is not running. Please start it with M-x server-start in Emacs.",
+			},
+		],
+		isError: true,
+	};
+}
 
 // Check if Emacs server is running on startup
 if (!isEmacsServerRunning()) {
-  console.error('Warning: Emacs server does not appear to be running.');
-  console.error('Please start the Emacs server with M-x server-start');
+	console.error("Warning: Emacs server does not appear to be running.");
+	console.error("Please start the Emacs server with M-x server-start");
+}
+
+/**
+ * Tool handler for emacs_eval - Evaluates Emacs Lisp expressions in the current buffer
+ * @param {Object} params - Parameters from the tool call
+ * @param {string} params.expression - The Emacs Lisp expression to evaluate
+ * @returns {Object} - Response object with evaluation result or error
+ */
+async function evalEmacsExpression({ expression }) {
+	try {
+		// Check if Emacs server is running
+		if (!isEmacsServerRunning()) {
+			return createServerNotRunningError();
+		}
+
+		// Run emacsclient --eval with the given expression, wrapping it to target the visible buffer
+		const result = execSync(
+			`emacsclient --eval "(with-current-buffer (window-buffer (selected-window)) ${escapeEmacsExpression(expression)})"`,
+			{
+				encoding: "utf8",
+			},
+		).trim();
+
+		return {
+			content: [
+				{
+					type: "text",
+					text: result,
+				},
+			],
+		};
+	} catch (error) {
+		return {
+			content: [
+				{
+					type: "text",
+					text: `Error evaluating expression: ${error.message}\nCommand may have timed out or failed to execute properly.`,
+				},
+			],
+			isError: true,
+		};
+	}
 }
 
 // Register the emacs_eval tool
 server.tool(
-  "emacs_eval",
-  "Evaluate a Lisp expression in the currently visible Emacs buffer and return the result",
-  {
-    expression: z.string().describe("Emacs Lisp expression to evaluate"),
-  },
-  async ({ expression }) => {
-    try {
-      // Check if Emacs server is running
-      if (!isEmacsServerRunning()) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Error: Emacs server is not running. Please start it with M-x server-start in Emacs.",
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      // Run emacsclient --eval with the given expression, wrapping it to target the visible buffer
-      const result = execSync(`emacsclient --eval "(with-current-buffer (window-buffer (selected-window)) ${escapeEmacsExpression(expression)})"`, {
-        encoding: "utf8",
-      }).trim();
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: result,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error evaluating expression: ${error.message}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-  },
-  { 
-    annotations: {
-      readOnlyHint: false,  // This tool can modify Emacs state
-      destructiveHint: true, // This tool could make destructive changes
-      idempotentHint: false, // Repeated calls might have different effects
-      openWorldHint: false   // This tool interacts with the closed world of Emacs
-    }
-  }
+	"emacs_eval",
+	"Evaluate a Lisp expression in the currently visible Emacs buffer and return the result",
+	{
+		expression: z.string().describe("Emacs Lisp expression to evaluate"),
+	},
+	evalEmacsExpression,
+	{
+		annotations: {
+			readOnlyHint: false, // This tool can modify Emacs state
+			destructiveHint: true, // This tool could make destructive changes
+			idempotentHint: false, // Repeated calls might have different effects
+			openWorldHint: false, // This tool interacts with the closed world of Emacs
+		},
+	},
 );
+
+/**
+ * Tool handler for emacs_get_visible_text - Gets the visible text in the current Emacs window
+ * @returns {Object} - Response object with visible text content or error
+ */
+async function getEmacsVisibleText() {
+	try {
+		// Check if Emacs server is running
+		if (!isEmacsServerRunning()) {
+			return createServerNotRunningError();
+		}
+
+		// This Lisp code gets the visible portion of the buffer in the selected window
+		const visibleTextExpression = `
+      (with-current-buffer (window-buffer (selected-window))
+        (let ((start (window-start))
+              (end (window-end nil t)))
+          (if (and start end)
+              (buffer-substring-no-properties start end)
+            "No visible text found")))
+    `;
+
+		const result = execSync(
+			`emacsclient --eval "${escapeEmacsExpression(visibleTextExpression)}"`,
+			{
+				encoding: "utf8",
+			},
+		).trim();
+
+		return {
+			content: [
+				{
+					type: "text",
+					text: result,
+				},
+			],
+		};
+	} catch (error) {
+		return {
+			content: [
+				{
+					type: "text",
+					text: `Error getting visible text: ${error.message}\nThe window or buffer may be in an inconsistent state.`,
+				},
+			],
+			isError: true,
+		};
+	}
+}
 
 // Tool to get visible text content from Emacs
 server.tool(
-  "emacs_get_visible_text",
-  "Get the text content currently visible in the active Emacs window",
-  {},
-  async () => {
-    try {
-      // Check if Emacs server is running
-      if (!isEmacsServerRunning()) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Error: Emacs server is not running. Please start it with M-x server-start in Emacs.",
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      // This Lisp code gets the visible portion of the buffer in the selected window
-      const visibleTextExpression = `
-        (with-current-buffer (window-buffer (selected-window))
-          (let ((start (window-start))
-                (end (window-end nil t)))
-            (if (and start end)
-                (buffer-substring-no-properties start end)
-              "No visible text found")))
-      `;
-
-      const result = execSync(`emacsclient --eval "${escapeEmacsExpression(visibleTextExpression)}"`, {
-        encoding: "utf8",
-      }).trim();
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: result,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error getting visible text: ${error.message}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-  },
-  { 
-    annotations: {
-      readOnlyHint: true,  // This tool doesn't modify Emacs state
-      openWorldHint: false // This tool interacts with the closed world of Emacs
-    }
-  }
+	"emacs_get_visible_text",
+	"Get the text content currently visible in the active Emacs window",
+	{},
+	getEmacsVisibleText,
+	{
+		annotations: {
+			readOnlyHint: true, // This tool doesn't modify Emacs state
+			openWorldHint: false, // This tool interacts with the closed world of Emacs
+		},
+	},
 );
+
+/**
+ * Tool handler for emacs_get_context - Gets information about the current Emacs buffer state
+ * @returns {Object} - Response object with buffer context information or error
+ */
+async function getEmacsContext() {
+	try {
+		// Check if Emacs server is running
+		if (!isEmacsServerRunning()) {
+			return createServerNotRunningError();
+		}
+
+		// Lisp code to get detailed context of the visible buffer
+		const contextExpression = `
+      (with-current-buffer (window-buffer (selected-window))
+        (format 
+            "Buffer: %s\nMode: %s\nPoint: %d\nLine Number: %d\nColumn: %d\nFile: %s\nModified: %s\nTotal Lines: %d"
+            (buffer-name) 
+            major-mode 
+            (point) 
+            (line-number-at-pos)
+            (current-column)
+            (or buffer-file-name "Not visiting a file")
+            (if (buffer-modified-p) "Yes" "No")
+            (count-lines (point-min) (point-max))))
+    `;
+
+		const result = execSync(
+			`emacsclient --eval "${escapeEmacsExpression(contextExpression)}"`,
+			{
+				encoding: "utf8",
+			},
+		).trim();
+
+		return {
+			content: [
+				{
+					type: "text",
+					text: result,
+				},
+			],
+		};
+	} catch (error) {
+		return {
+			content: [
+				{
+					type: "text",
+					text: `Error getting Emacs context: ${error.message}\nThere may be an issue accessing the current buffer or window information.`,
+				},
+			],
+			isError: true,
+		};
+	}
+}
 
 // Tool to get context about the current Emacs state
 server.tool(
-  "emacs_get_context",
-  "Get contextual information about the currently visible Emacs buffer (name, mode, point position, etc)",
-  {},
-  async () => {
-    try {
-      // Check if Emacs server is running
-      if (!isEmacsServerRunning()) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Error: Emacs server is not running. Please start it with M-x server-start in Emacs.",
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      // Lisp code to get detailed context of the visible buffer
-      const contextExpression = `
-        (with-current-buffer (window-buffer (selected-window))
-          (format 
-              "Buffer: %s\nMode: %s\nPoint: %d\nLine Number: %d\nColumn: %d\nFile: %s\nModified: %s\nTotal Lines: %d"
-              (buffer-name) 
-              major-mode 
-              (point) 
-              (line-number-at-pos)
-              (current-column)
-              (or buffer-file-name "Not visiting a file")
-              (if (buffer-modified-p) "Yes" "No")
-              (count-lines (point-min) (point-max))))
-      `;
-
-      const result = execSync(`emacsclient --eval "${escapeEmacsExpression(contextExpression)}"`, {
-        encoding: "utf8",
-      }).trim();
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: result,
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error getting Emacs context: ${error.message}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-  },
-  { 
-    annotations: {
-      readOnlyHint: true,  // This tool doesn't modify Emacs state
-      openWorldHint: false // This tool interacts with the closed world of Emacs
-    }
-  }
+	"emacs_get_context",
+	"Get contextual information about the currently visible Emacs buffer (name, mode, point position, etc)",
+	{},
+	getEmacsContext,
+	{
+		annotations: {
+			readOnlyHint: true, // This tool doesn't modify Emacs state
+			openWorldHint: false, // This tool interacts with the closed world of Emacs
+		},
+	},
 );
-
-
 
 // Start the server
 async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("Emacs MCP Server running on stdio");
+	const transport = new StdioServerTransport();
+	await server.connect(transport);
+	console.error("Emacs MCP Server running on stdio");
 }
 
 main().catch((error) => {
-  console.error("Fatal error in main():", error);
-  process.exit(1);
+	console.error("Fatal error in main():", error);
+	process.exit(1);
 });
