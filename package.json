@@ -1,0 +1,16 @@
+{
+  "name": "@keegancsmith/emacs-mcp-server",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "MCP server for Emacs integration",
+  "main": "emacs-mcp-server.js",
+  "bin": {
+    "emacs-mcp-server": "./emacs-mcp-server.js"
+  },
+  "author": "Keegan Carruthers-Smith <keegan.csmith@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.2.0",
+    "zod": "^3.22.4"
+  }
+}
