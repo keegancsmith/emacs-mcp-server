@@ -15,7 +15,7 @@ const server = new McpServer({
 		tools: {},
 	},
 	instructions:
-		"This server provides access to evaluate Emacs Lisp expressions via emacsclient in the currently visible Emacs buffer. You can evaluate code or capture visible text content from the active Emacs window. Make sure Emacs is running with server mode enabled (M-x server-start).",
+		"This server provides access to evaluate Emacs Lisp expressions via emacsclient in the currently visible Emacs buffer. You can evaluate code or capture visible text content from the active Emacs window. Make sure Emacs is running with server mode enabled (M-x server-start). Note that many Emacs Lisp expressions modify state but only return 't' to indicate success. When using emacs_eval to run such commands, follow up with emacs_get_context or emacs_get_visible_text to verify the actual state changes. Example pattern: First run emacs_eval with your command, then run emacs_get_context to check the new state.",
 });
 
 /**
@@ -109,7 +109,7 @@ async function evalEmacsExpression({ expression }) {
 // Register the emacs_eval tool
 server.tool(
 	"emacs_eval",
-	"Evaluate a Lisp expression in the currently visible Emacs buffer and return the result",
+	"Evaluate a Lisp expression in the currently visible Emacs buffer and return the result. Many Emacs Lisp expressions mutate state in Emacs and simply return 't' to indicate success rather than returning the changed state. After executing expressions that may change state, use emacs_get_context or emacs_get_visible_text to check the resulting state changes.",
 	{
 		expression: z.string().describe("Emacs Lisp expression to evaluate"),
 	},
